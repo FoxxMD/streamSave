@@ -1,0 +1,22 @@
+{
+  "name": "streamsavejs",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "argv": "0.0.2",
+    "dayjs": "^1.10.4",
+    "icy": "^2.1.0",
+    "minimist": "^1.2.5",
+    "mustache": "^4.1.0",
+    "winston": "^3.3.3",
+    "winston-daily-rotate-file": "^4.5.0"
+  }
+}
