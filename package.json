@@ -16,6 +16,7 @@
     "icy": "^2.1.0",
     "minimist": "^1.2.5",
     "mustache": "^4.1.0",
+    "safe-stable-stringify": "^1.1.1",
     "winston": "^3.3.3",
     "winston-daily-rotate-file": "^4.5.0"
   }
