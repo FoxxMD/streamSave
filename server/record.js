@@ -6,7 +6,7 @@ import NodeID3 from 'node-id3';
 import {icyRequest, cueStartChunk, generateCueChunk, randomId, createLabelledLogger} from "./util.js";
 import path from "path";
 
-const { Promise: id3 } = NodeID3;
+const {Promise: id3} = NodeID3;
 
 export const record = async (url, duration, options = {}) => {
     const {
@@ -56,39 +56,44 @@ export const record = async (url, duration, options = {}) => {
     logger.info(`Stream: ${url} | Duration: ${duration === 0 ? 'Forever' : `${duration}s`} | Metadata Behavior: ${metaHint}`);
     logger.info("Requesting stream...");
 
-    const req = icyRequest(url, async (res) => {
+    // wait for response
+    const res = await icyRequest(url);
 
-        logger.info("Stream response OK!");
+    logger.info("Stream response OK!");
 
-        if (!fs.existsSync(finalDir)) {
-            logger.info('Creating output directory...')
-            fs.mkdirSync(path.dirname(filePath));
-        }
+    if (!fs.existsSync(finalDir)) {
+        logger.info('Creating output directory...')
+        fs.mkdirSync(path.dirname(filePath));
+    }
+    let outputStream = fs.createWriteStream(filePath);
 
-        let outputStream = fs.createWriteStream(filePath);
+    // Counters
+    let startTime = dayjs();
+    let endTime = dayjs().add(duration, 's');
+    let lastProgress = null;
 
-        // Counters
-        let startTime = dayjs();
-        let endTime = dayjs().add(duration, 's');
-        let lastProgress = null;
+    let cueStream = null;
+    let metaIndex = 1;
+    try {
 
-        let cueStream = null;
-        let metaIndex = 1;
-
-        res.on('metadata', function (metadata) {
+        // set metadata event behavior
+        res.on('metadata', async function (metadata) {
             const parsed = icy.parse(metadata);
             const {StreamTitle = 'Unknown'} = parsed;
             const dur = dayjs.duration(dayjs().diff(startTime, 'ms'));
             const marker = {title: StreamTitle, duration: dur, index: metaIndex};
             logger.debug('New Metadata:', parsed);
             if (metadataBehavior === 'cue') {
+
                 if (cueStream === null) {
                     cueStream = fs.createWriteStream(`${filePath}.cue`);
                     cueStream.write(cueStartChunk);
                     logger.info(`Wrote new Metadata to cue file: ${StreamTitle}`);
                 }
                 cueStream.write(generateCueChunk(marker));
+
             } else if (metadataBehavior === 'split') {
+
                 const metaNow = dayjs();
                 const newFilePath = getFilePath(dir, template, {
                     ...templateData,
@@ -99,28 +104,34 @@ export const record = async (url, duration, options = {}) => {
                         return metaNow.local().format(text);
                     }
                 });
-                res.unpipe(outputStream);
-                outputStream.end();
+                // remove previous write stream and close it out
+                await res.unpipe(outputStream);
+                await outputStream.end();
+
+                // create new write stream to new file path
                 outputStream = fs.createWriteStream(newFilePath);
-                res.pipe(outputStream);
-                logger.info(`Started new track on new Metadata: ${StreamTitle}`);
-                // don't know how else to do this right now...
-                setTimeout(() => {
-                    id3.write({
+                outputStream.on('finish', async () => {
+                    await id3.write({
                         title: StreamTitle,
-                        trackNumber: metaIndex,
+                        trackNumber: metaIndex.toString(),
                         audioSourceUrl: url,
-                        date: now.local().toISOString(),
+                        date: now.local().format('DDMM'),
+                        year: now.local().format('YYYY'),
+                        time: now.local().format('HHmm'),
                         comment: {
                             language: 'eng',
                             text: 'captured with streamSave',
                         }
                     }, newFilePath);
-                }, 200);
+                });
+                await res.pipe(outputStream);
+                logger.info(`Started new track on new Metadata: ${StreamTitle}`);
+
             }
             metaIndex++;
         });
 
+        // track streaming progress
         res.on('data', (chunk) => {
             const now = dayjs();
             if (lastProgress === null) {
@@ -136,23 +147,28 @@ export const record = async (url, duration, options = {}) => {
             }
         });
 
+        // initial write stream id3 write
+        outputStream.on('finish', async () => {
+            await id3.write({
+                title: id,
+                audioSourceUrl: url,
+                date: now.local().format('DDMM'),
+                year: now.local().format('YYYY'),
+                time: now.local().format('HHmm'),
+                comment: {
+                    language: 'eng',
+                    text: 'captured with streamSave',
+                }
+            }, filePath);
+        });
         await res.pipe(outputStream);
-        await id3.write({
-            title: id,
-            audioSourceUrl: url,
-            date: now.local().toISOString(),
-            comment: {
-                language: 'eng',
-                text: 'captured with streamSave',
-            }
-        }, filePath);
-    });
-
-    await req;
+    } catch (e) {
+        logger.error(e);
+        throw e;
+    }
 }
 
 const getFilePath = (dir, template, context = {}) => {
-
     const pathName = Mustache.render(template, context);
     return path.join(dir, `${pathName}.mp3`);
 }

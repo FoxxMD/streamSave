@@ -6,34 +6,6 @@ import jsonStringify from 'safe-stable-stringify';
 const {format} = winston;
 const {combine, printf, timestamp, label, splat, errors} = format;
 
-// export const promisfyIcyRequest = async (options, func) => {
-//     return new Promise((resolve, reject) => {
-//         const req = lib.request(params, res => {
-//             if (res.statusCode < 200 || res.statusCode >= 300) {
-//                 return reject(new Error(`Status Code: ${res.statusCode}`));
-//             }
-//
-//             const data = [];
-//
-//             res.on('data', chunk => {
-//                 data.push(chunk);
-//             });
-//
-//             res.on('end', () => resolve(Buffer.concat(data).toString()));
-//         });
-//
-//         req.on('error', reject);
-//
-//         if (postData) {
-//             req.write(postData);
-//         }
-//
-//         // IMPORTANT
-//         req.end();
-//     });
-// };
-// }
-
 export const icyRequest = async (url, func, options = {}) => {
     const {
         body,
@@ -46,17 +18,6 @@ export const icyRequest = async (url, func, options = {}) => {
         protocol,
     } = urlInfo;
 
-    // const protocol = url.startsWith('https://') ? 'https' : 'http';
-    //
-    // const [h, path] = url.split('://')[1].split('/');
-    // const [host, port] = h.split(':');
-    //
-    // const params = {
-    //     method,
-    //     host,
-    //     port: port || url.startsWith('https://') ? 443 : 80,
-    //     path: path || '/',
-    // };
     const params = {
         host,
         path,
@@ -66,40 +27,12 @@ export const icyRequest = async (url, func, options = {}) => {
     };
 
     return new Promise((resolve, reject) => {
-       const req = icy.request(params, (res) => {
-           if (res.statusCode < 200 || res.statusCode >= 300) {
-               return reject(new Error(`Status Code: ${res.statusCode}`));
-           }
-
-           const data = [];
-
-           res.on('data', chunk => {
-               data.push(chunk);
-           });
-
-           res.on('end', () => resolve(Buffer.concat(data).toString()));
-
-           func(res);
-
-            // res.on('metadata', function (metadata) {
-            //
-            //     var parsed = icy.parse(metadata);
-            //     console.error(parsed);
-            // });
+        const req = icy.request(params, (res) => {
+            if (res.statusCode < 200 || res.statusCode >= 300) {
+                return reject(new Error(`Status Code: ${res.statusCode}`));
+            }
+            resolve(res);
         });
-        // const req = lib.request(params, res => {
-        //     if (res.statusCode < 200 || res.statusCode >= 300) {
-        //         return reject(new Error(`Status Code: ${res.statusCode}`));
-        //     }
-        //
-        //     const data = [];
-        //
-        //     res.on('data', chunk => {
-        //         data.push(chunk);
-        //     });
-        //
-        //     res.on('end', () => resolve(Buffer.concat(data).toString()));
-        // });
 
         req.on('error', reject);
 
