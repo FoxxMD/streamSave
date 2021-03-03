@@ -82,12 +82,3 @@ node index.js https://example.com/sample.aac 30 --id=mySpecificStream --name="{{
 ```
 CWD/streams/example.com/2021-02/25/mySpecificStream_16-06-36.mp3
 ```
-
-### TODOs and other resources
-
-for handling playlists
-* https://github.com/fent/node-m3u8stream
-
-some other resources
-* https://github.com/radioangrezi/docker-streamripper
-* https://github.com/clue/docker-streamripper
