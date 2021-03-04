@@ -6,8 +6,8 @@ import {Writable} from 'stream';
 import winston from 'winston';
 import 'winston-daily-rotate-file';
 
-import record from './server/record.js';
 import {labelledFormat} from "./server/util.js";
+import CaptureTask from "./server/CaptureTask.js";
 
 dayjs.extend(utc);
 dayjs.extend(dduration);
@@ -96,6 +96,8 @@ const configDir = cDir || `${process.cwd()}/config`;
         if (duration === undefined) {
             throw new Error('duration (second arg) must be defined');
         }
-        await record(url, duration, {metadataBehavior: meta, id, dir: outputDir, nameTemplate: name});
+        const task = new CaptureTask(url, duration, {metadataBehavior: meta, id, dir: outputDir, template: name})
+
+        await task.capture();
     }
 }());

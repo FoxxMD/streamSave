@@ -14,9 +14,12 @@
     "argv": "0.0.2",
     "dayjs": "^1.10.4",
     "icy": "^2.1.0",
+    "m3u8stream": "^0.8.3",
+    "mime-types": "^2.1.29",
     "minimist": "^1.2.5",
     "mustache": "^4.1.0",
     "node-id3": "^0.2.2",
+    "p-event": "^4.2.0",
     "safe-stable-stringify": "^1.1.1",
     "winston": "^3.3.3",
     "winston-daily-rotate-file": "^4.5.0"

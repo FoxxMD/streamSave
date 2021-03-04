@@ -2,6 +2,8 @@ import icy from 'icy';
 import dayjs from 'dayjs';
 import winston from "winston";
 import jsonStringify from 'safe-stable-stringify';
+import mime from 'mime-types';
+import path from 'path';
 
 const {format} = winston;
 const {combine, printf, timestamp, label, splat, errors} = format;
@@ -129,3 +131,40 @@ export const createLabelledLogger = (name = 'default', label = 'App') => {
 
 // https://gist.github.com/6174/6062387#gistcomment-2651745
 export const randomId = (length = 8) => [...Array(length)].map(i=>(~~(Math.random()*36)).toString(36)).join('')
+
+export const getExtensionFromContentType = (contentType, url = undefined) => {
+
+    let isAudio = false;
+    let ext = url !== undefined ? path.extname(url) : undefined;
+    if(ext === '') {
+        ext = undefined;
+    }
+    if (ext !== undefined) {
+        const type = mime.lookup(ext);
+        isAudio = type.includes('audio');
+    }
+    if (!isAudio) {
+        const ct = mime.contentType(contentType);
+        isAudio = contentType.includes('audio') || (ct !== false && ct.includes('audio'));
+        ext = mime.extension(contentType);
+
+        if (ct !== false) {
+            const extensions = mime.extensions[ct];
+            if (extensions !== undefined) {
+                if (extensions.includes('mp3')) {
+                    ext = '.mp3'
+                } else {
+                    ext = mime.extension(ct)
+                }
+            } else {
+                // exceptions :(
+                if (ct.includes('aac')) {
+                    ext = '.aac';
+                }
+                // leave blank for more later
+            }
+        }
+    }
+
+    return [ext, isAudio];
+}
