@@ -19,6 +19,7 @@
     "minimist": "^1.2.5",
     "mustache": "^4.1.0",
     "node-id3": "^0.2.2",
+    "node-schedule": "^2.0.0",
     "p-event": "^4.2.0",
     "safe-stable-stringify": "^1.1.1",
     "winston": "^3.3.3",
