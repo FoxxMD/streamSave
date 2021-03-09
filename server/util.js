@@ -4,6 +4,7 @@ import winston from "winston";
 import jsonStringify from 'safe-stable-stringify';
 import mime from 'mime-types';
 import path from 'path';
+import {constants, promises} from "fs";
 
 const {format} = winston;
 const {combine, printf, timestamp, label, splat, errors} = format;
@@ -167,4 +168,29 @@ export const getExtensionFromContentType = (contentType, url = undefined) => {
     }
 
     return [ext, isAudio];
+}
+
+
+export async function readJson(p, {logErrors = true, throwOnNotFound = true, logger = winston.loggers.get('app')} = {}) {
+    try {
+        const realPath = await promises.realpath(p);
+        await promises.access(realPath, constants.R_OK);
+        const data = await promises.readFile(realPath);
+        return JSON.parse(data);
+    } catch (e) {
+        const {code} = e;
+        if (code === 'ENOENT') {
+            if (throwOnNotFound) {
+                if (logErrors) {
+                    logger.warn('No file found at given path', {filePath: p});
+                }
+                throw e;
+            } else {
+                return;
+            }
+        } else if (logErrors) {
+            logger.warn(`Encountered error while parsing file`, {filePath: p});
+        }
+        throw e;
+    }
 }
