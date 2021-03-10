@@ -15,7 +15,6 @@ import schedule from 'node-schedule';
 
 import {labelledFormat, readJson} from "./src/util.js";
 import CaptureTask from "./src/CaptureTask.js";
-import {parseConfigFile, parseProgramFile} from "./server/configParser.js";
 import Program from "./src/Program.js";
 
 dayjs.extend(utc);
@@ -140,7 +139,7 @@ const configDirVal = cDir ?? `${process.cwd()}/config`;
                     throw e;
                 }
             }
-        } else {
+        } else if(path.extname(f) === '.json') {
             try {
                 const programData = await readJson(path.join(configDir, f));
                 const program = new Program({id: path.basename(f, '.json'), ...programData});
@@ -175,7 +174,8 @@ const configDirVal = cDir ?? `${process.cwd()}/config`;
                 } else {
                     // try filepath
                     try {
-                        program = await parseProgramFile(single, {single: true});
+                        const programData = await readJson(single);
+                        program = new Program(programData);
                     } catch (e) {
                         logger.error(`No Program with the id ${single} and parsing as path produced an error`);
                         process.exit(1);
@@ -193,7 +193,7 @@ const configDirVal = cDir ?? `${process.cwd()}/config`;
         if (pUrl === undefined) {
             throw new Error('Single Mode => url must be defined');
         }
-        const task = new CaptureTask(url, duration, {...progRest, ...cliRest, dir: od})
+        const task = new CaptureTask(pUrl, pDuration, {...progRest, ...cliRest, dir: od})
 
         await task.capture();
     } else {

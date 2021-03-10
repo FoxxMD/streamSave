@@ -4,7 +4,7 @@ import winston from "winston";
 import jsonStringify from 'safe-stable-stringify';
 import mime from 'mime-types';
 import path from 'path';
-import {constants, promises} from "fs";
+import {constants, promises, existsSync} from "fs";
 
 const {format} = winston;
 const {combine, printf, timestamp, label, splat, errors} = format;
@@ -193,4 +193,49 @@ export async function readJson(p, {logErrors = true, throwOnNotFound = true, log
         }
         throw e;
     }
+}
+
+export const getOutputPath = async (filePath, {
+    createDir = true,
+    onExistingFile,
+    logger = winston.loggers.get('app')
+} = {}) => {
+    const dir = path.dirname(filePath);
+
+    if (!existsSync(dir) && createDir) {
+        logger.debug(`Directory for file path does not exist, creating: ${dir}`);
+        await promises.mkdir(path.dirname(filePath), {recursive: true});
+    }
+
+    try {
+        await promises.access(filePath, constants.F_OK);
+        if (onExistingFile === undefined || onExistingFile === 'stop') {
+            throw new Error(`File exists and existing behavior is not defined: ${filePath}`);
+        } else if (onExistingFile === 'overwrite') {
+            return filePath;
+        }
+    } catch (e) {
+        return filePath;
+    }
+
+    // want unique, need to find all existing with our unique rename pattern
+    const ext = path.extname(filePath);
+    const filename = path.basename(filePath, ext);
+    const files = await promises.readdir(dir);
+    // TODO replace naive file count approach with a regex that matches [filename]-[num].ext
+    const matchedFiles = files.filter(x => x.includes(filename));
+    let cnt = matchedFiles.length;
+    let unique = false;
+    let uniqueFilePath;
+    while (!unique) {
+        uniqueFilePath = `${filename}-${cnt}${ext}`;
+        try {
+            await promises.access(uniqueFilePath, constants.F_OK);
+        } catch (e) {
+            // does not exist, we good
+            unique = true;
+        }
+        cnt++;
+    }
+    return uniqueFilePath;
 }

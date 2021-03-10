@@ -11,13 +11,12 @@ import {
     generateCueChunk,
     randomId,
     createLabelledLogger,
-    getExtensionFromContentType
+    getExtensionFromContentType, getOutputPath
 } from "./util.js";
 import path from "path";
 import m3u8stream from 'm3u8stream';
 import pEvent from 'p-event';
 
-const {promises: fsasync} = fs;
 const {Promise: id3} = NodeID3;
 
 export default class CaptureTask {
@@ -51,6 +50,7 @@ export default class CaptureTask {
             logger = createLabelledLogger(`Stream ${id}`, `Stream ${id}`),
             logProgressInterval = 5,
             progressInterval = 1,
+            onExistingFile = 'unique',
             logProgress = false,
             emitter = new events.EventEmitter(),
         } = config;
@@ -60,7 +60,8 @@ export default class CaptureTask {
             metadataBehavior,
             progressInterval: Math.min(Math.max(1, progressInterval), Math.max(logProgressInterval, 5)),
             logProgressInterval: Math.max(logProgressInterval, 5),
-            logProgress
+            logProgress,
+            onExistingFile
         }
         this.id = id;
         this.emitter = emitter;
@@ -85,31 +86,10 @@ export default class CaptureTask {
 
         const {
             metadataBehavior = 'none',
-            template
+            onExistingFile = 'unique',
         } = this.config;
 
-        const urlInfo = new URL(this.url);
-        const {hostname} = urlInfo;
-
         this.logger.info('Stream task initiated');
-
-        const now = dayjs();
-        const templateData = {
-            id: this.id,
-            hostname,
-            date: now.local().format('YYYY-MM-DD'),
-            time: now.local().format('HH-mm-ss'),
-            dt: () => (text, render) => {
-                return now.local().format(text);
-            }
-        }
-
-        const filePath = this.getFilePath(template, templateData);
-        const finalDir = path.dirname(filePath);
-
-        if (!fs.existsSync(finalDir)) {
-            await fsasync.mkdir(path.dirname(filePath), {recursive: true});
-        }
 
         let metaHint = 'None';
         if (metadataBehavior === 'cue') {
@@ -117,7 +97,20 @@ export default class CaptureTask {
         } else if (metadataBehavior === 'split') {
             metaHint = 'Create new file on metadata change';
         }
-        this.logger.info(`Stream: ${this.url} | Duration: ${this.duration === 0 ? 'Forever' : `${this.duration}s`} | Metadata Behavior: ${metaHint}`);
+        let existingBehaviorHint;
+        if(onExistingFile === 'unique') {
+            existingBehaviorHint = 'create unique name';
+        } else if(onExistingFile === 'overwrite') {
+            existingBehaviorHint = 'overwrite';
+        } else {
+            existingBehaviorHint = 'stop capture'
+        }
+
+        this.logger.info(`Stream: ${this.url}
+        Duration: ${this.duration === 0 ? 'Forever' : `${this.duration}s`}
+        Metadata Behavior: ${metaHint}
+        On Existing File: ${existingBehaviorHint}`);
+
         this.logger.info("Requesting stream...");
 
         try {
@@ -144,8 +137,8 @@ export default class CaptureTask {
         }
         this.extension = ext;
 
-        const filePath = this.getFilePath(this.config.template);
-        this.outputStream = this.createOutputStream(filePath);
+        const filePath = this.deriveFilePath(this.config.template);
+        this.outputStream = await this.createOutputStream(filePath);
         this.outputStream.on('finish', async () => this.onOutputFinish(filePath))
         this.startTime = dayjs();
         this.endTime = dayjs().add(this.duration, 's');
@@ -187,7 +180,7 @@ export default class CaptureTask {
             this.emitter.emit('captureFinish');
         });
 
-        this.outputStream = this.createOutputStream(this.getFilePath(this.config.template));
+        this.outputStream = await this.createOutputStream(this.deriveFilePath(this.config.template));
         m3Stream.pipe(this.outputStream);
 
         await pEvent(this.emitter, 'captureFinish');
@@ -208,7 +201,7 @@ export default class CaptureTask {
         if (metadataBehavior === 'cue') {
 
             if (this.cueStream === null) {
-                this.cueStream = fs.createWriteStream(`${this.getFilePath(template)}.cue`);
+                this.cueStream = fs.createWriteStream(`${this.deriveFilePath(template)}.cue`);
                 this.cueStream.write(cueStartChunk);
                 this.logger.info(`Wrote metadata change to cue file: ${StreamTitle}`);
             }
@@ -217,7 +210,7 @@ export default class CaptureTask {
         } else if (metadataBehavior === 'split') {
 
             const metaNow = dayjs();
-            const newFilePath = this.getFilePath(template, {
+            const newFilePath = this.deriveFilePath(template, {
                 metadata: StreamTitle,
                 metaindex: this.metaIndex,
                 metatime: metaNow.local().format('HH-mm-ss-SSS'),
@@ -232,7 +225,7 @@ export default class CaptureTask {
             this.logger.info(`Starting new track on metadata change: ${StreamTitle}`);
 
             // create new write stream to new file path
-            this.outputStream = this.createOutputStream(newFilePath);
+            this.outputStream = await this.createOutputStream(newFilePath);
             this.outputStream.on('finish', async () => this.onOutputFinish(newFilePath, StreamTitle))
             await readable.pipe(this.outputStream);
         }
@@ -276,8 +269,9 @@ export default class CaptureTask {
         }
     }
 
-    createOutputStream = (filePath) => {
-        this.logger.info(`Output To: ${filePath}`);
+    createOutputStream = async (filePath) => {
+        const realFilePath = await getOutputPath(filePath, {onExistingFile: this.config.onExistingFile, logger: this.logger});
+        this.logger.info(`Output To: ${realFilePath}`);
         if (this.extension === undefined && this.unknownExtensionNotified === false) {
             this.logger.warn('Could not determine file extension from URL or response Content-Type!');
             this.unknownExtensionNotified = true;
@@ -285,7 +279,7 @@ export default class CaptureTask {
         return fs.createWriteStream(filePath);
     }
 
-    getFilePath = (template, context = {}, extension = this.extension) => {
+    deriveFilePath = (template, context = {}, extension = this.extension) => {
         const templateData = {...this.defaultTemplateData(), ...context};
         const pathName = Mustache.render(template, templateData);
         return path.join(this.config.dir, `${pathName}${extension}`);
