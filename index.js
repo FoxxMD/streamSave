@@ -1,21 +1,29 @@
 import fs, {promises} from 'fs';
 import path from 'path';
+import {addAsync, Router} from '@awaitjs/express';
+import express from 'express';
+import bodyParser from 'body-parser';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import dduration from 'dayjs/plugin/duration.js';
+import calendarPlugin from 'dayjs/plugin/calendar.js';
 import minimist from 'minimist';
 import {Writable} from 'stream';
 import winston from 'winston';
 import 'winston-daily-rotate-file';
+import schedule from 'node-schedule';
 
-import {labelledFormat, readJson} from "./server/util.js";
-import CaptureTask from "./server/CaptureTask.js";
+import {labelledFormat, readJson} from "./src/util.js";
+import CaptureTask from "./src/CaptureTask.js";
 import {parseConfigFile, parseProgramFile} from "./server/configParser.js";
+import Program from "./src/Program.js";
 
 dayjs.extend(utc);
 dayjs.extend(dduration);
+dayjs.extend(calendarPlugin);
 
 const {transports} = winston;
+const {Job} = schedule;
 
 const argv = minimist(process.argv.slice(2));
 const {
@@ -80,9 +88,9 @@ const loggerOptions = {
     transports: myTransports,
 };
 
-winston.loggers.add('app', loggerOptions);
+winston.loggers.add('default', loggerOptions);
 
-const logger = winston.loggers.get('app');
+const logger = winston.loggers.get('default');
 
 const configDirVal = cDir ?? `${process.cwd()}/config`;
 
@@ -94,6 +102,8 @@ const configDirVal = cDir ?? `${process.cwd()}/config`;
         outputDir: outputDir ?? `${process.cwd()}/streams`
     };
     let programs = [];
+    let scheduledJobsData = [];
+    let executedJobsData = [];
     let configDir;
     // load all configs
     try {
@@ -121,21 +131,19 @@ const configDirVal = cDir ?? `${process.cwd()}/config`;
 
     for (const f of files) {
         if (f === 'config.json') {
-            let config = {}
             try {
-                config = await parseConfigFile(path.join(configDir, f), {single});
+                const configDefaults = await readJson(path.join(configDir, f));
+                defaults = {...defaults, ...configDefaults};
             } catch (e) {
                 if (!cliMode) {
                     logger.error('Exception occurred while reading config file');
                     throw e;
                 }
             }
-            const {defaults: d = {}, programs: programsFromConfig = []} = config;
-            defaults = {...defaults, ...d};
-            programs = programs.concat(programsFromConfig);
         } else {
             try {
-                const program = await parseProgramFile(path.join(configDir, f), {single});
+                const programData = await readJson(path.join(configDir, f));
+                const program = new Program({id: path.basename(f, '.json'), ...programData});
                 programs.push(program);
             } catch (e) {
                 if (!cliMode) {
@@ -188,5 +196,39 @@ const configDirVal = cDir ?? `${process.cwd()}/config`;
         const task = new CaptureTask(url, duration, {...progRest, ...cliRest, dir: od})
 
         await task.capture();
+    } else {
+        // server mode
+        const app = addAsync(express());
+        const router = Router();
+
+        app.use(router);
+        app.use(bodyParser.json());
+
+        scheduledJobsData = programs.reduce((acc, program) => {
+            return acc.concat(program.scheduledEvents.map(se => {
+                    const task = new CaptureTask(program.url, se.duration,
+                        {
+                            template: program.template,
+                            onExistingFile: program.onExistingFile,
+                            metadataBehavior: program.metadataBehavior
+                        });
+                    const data = {
+                        program,
+                        scheduledEvent: se,
+                        job: schedule.scheduleJob(se.getScheduleData(), async () => {
+                            se.logger.debug(`${se.id} => Im scheduled!`);
+                            await task.capture();
+                        }),
+                    };
+                    se.logger.info(`Scheduled Event ${se.id} => Scheduled for ${dayjs(data.job.nextInvocation()).calendar()}`)
+                }
+            ));
+        }, [])
+            .flat(2);
+
+        // TODO check if any programs should be running now
+
+        logger.info(`Server started at ${localUrl}`);
+        await app.listen(port)
     }
 }());

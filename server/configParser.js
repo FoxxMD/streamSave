@@ -1,9 +1,9 @@
 import winston from "winston";
-import {readJson} from "./util.js";
+import {readJson} from "../src/util.js";
 
 export const validateProgram = (program, {
     configFilePath,
-    logger = winston.loggers.get('app'),
+    logger = winston.loggers.get('default'),
     single = false,
 } = {}) => {
     const {
