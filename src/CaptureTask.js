@@ -27,6 +27,7 @@ export default class CaptureTask {
     duration;
     emitter;
     logger;
+    stream;
 
     cueStream;
     outputStream;
@@ -106,10 +107,11 @@ export default class CaptureTask {
             existingBehaviorHint = 'stop capture'
         }
 
-        this.logger.info(`Stream: ${this.url}
-        Duration: ${this.duration === 0 ? 'Forever' : `${this.duration}s`}
-        Metadata Behavior: ${metaHint}
-        On Existing File: ${existingBehaviorHint}`);
+        this.logger.info(`
+    Requested URL: ${this.url}
+    Duration: ${this.duration === undefined || this.duration === 0 ? 'Forever' : `${this.duration}s`}
+    Metadata Behavior: ${metaHint}
+    On Existing File: ${existingBehaviorHint}`);
 
         this.logger.info("Requesting stream...");
 
@@ -127,11 +129,18 @@ export default class CaptureTask {
     }
 
     captureDirectStream = async () => {
-        let res = await icyRequest(this.url);
+        let [stream, rawStream, res] =  await icyRequest(this.url);
 
-        this.logger.info("Stream response OK!");
+        this.logger.info(`Response OK => ${res.url}`);
+        if(res.redirectUrls.length === 0) {
+            this.logger.debug('No redirects');
+        } else {
+            for(const r of res.redirectUrls) {
+                this.logger.debug(`Redirect => ${r}`);
+            }
+        }
 
-        const [ext, isAudio] = getExtensionFromContentType(res.res.headers['content-type'], this.url);
+        const [ext, isAudio] = getExtensionFromContentType(res.headers['content-type'], this.url);
         if (!isAudio) {
             this.logger.warn('Could not determine if response was audio from extension or response Content-Type!');
         }
@@ -143,12 +152,19 @@ export default class CaptureTask {
         this.startTime = dayjs();
         this.endTime = dayjs().add(this.duration, 's');
 
-        res.on('metadata', async (metadata) => this.onMetadata(res, metadata));
-        res.on('data', async (chunk) => this.onData(res, chunk));
-        res.on('end', () => this.emitter.emit('captureFinish'));
+        stream.on('metadata', async (metadata) => this.onMetadata(metadata));
+        stream.on('data', async (chunk) => this.onData(stream, chunk));
+        stream.on('end', (f) => {
+            this.emitter.emit('captureFinish') ;
+        });
+        // might want to incorporate this eventually
+        // rawStream.on('downloadProgress', (progress) => {
+        //     this.logger.info(progress);
+        // });
 
         this.emitter.emit('captureStart');
-        res.pipe(this.outputStream);
+        this.stream = stream;
+        this.stream.pipe(this.outputStream);
 
         await pEvent(this.emitter, 'captureFinish');
     }
@@ -186,7 +202,7 @@ export default class CaptureTask {
         await pEvent(this.emitter, 'captureFinish');
     }
 
-    onMetadata = async (readable, metadata) => {
+    onMetadata = async (metadata) => {
 
         const {
             metadataBehavior = 'none',
@@ -219,7 +235,7 @@ export default class CaptureTask {
                 }
             });
             // remove previous write stream and close it out
-            await readable.unpipe(this.outputStream);
+            await this.stream.unpipe(this.outputStream);
             await this.outputStream.end();
 
             this.logger.info(`Starting new track on metadata change: ${StreamTitle}`);
@@ -227,24 +243,24 @@ export default class CaptureTask {
             // create new write stream to new file path
             this.outputStream = await this.createOutputStream(newFilePath);
             this.outputStream.on('finish', async () => this.onOutputFinish(newFilePath, StreamTitle))
-            await readable.pipe(this.outputStream);
+            await this.stream.pipe(this.outputStream);
         }
         this.metaIndex++;
     }
 
     onData = (readable, chunk) => {
         const now = dayjs();
-        if (this.lastProgress === null) {
+        if (this.lastProgress === undefined) {
             this.lastProgress = dayjs();
             this.logger.info('Stream capture started!');
         } else if (this.duration !== 0 && now.isAfter(this.endTime)) {
             this.logger.info('Duration reached, ending stream capture');
             readable.end();
         } else if (now.diff(this.lastProgress, 's') >= this.config.progressInterval) {
-            const streamedFor = dayjs.duration(dayjs().diff(this.startTime, 'ms')).format('HH-mm-ss-SSS');
-            this.emitter.emit('captureProgress', streamedFor);
+            const streamedFor = dayjs.duration(dayjs().diff(this.startTime, 'ms'));
+            this.emitter.emit('captureProgress', streamedFor.format('HH-mm-ss-SSS'));
             if (this.config.logProgress !== false && now.diff(this.lastProgress, 's') >= this.config.logProgressInterval) {
-                this.logger.info(`Streamed ${streamedFor}`);
+                this.logger.info(`Streamed ${streamedFor.format('HH:mm:ss')}`);
             }
             this.lastProgress = dayjs();
         }
@@ -276,7 +292,7 @@ export default class CaptureTask {
             this.logger.warn('Could not determine file extension from URL or response Content-Type!');
             this.unknownExtensionNotified = true;
         }
-        return fs.createWriteStream(filePath);
+        return fs.createWriteStream(realFilePath);
     }
 
     deriveFilePath = (template, context = {}, extension = this.extension) => {

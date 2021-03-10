@@ -1,52 +1,34 @@
-import icy from 'icy';
+import IcyReader from 'icy/lib/reader.js';
 import dayjs from 'dayjs';
 import winston from "winston";
 import jsonStringify from 'safe-stable-stringify';
 import mime from 'mime-types';
+import got from 'got';
+import pEvent from 'p-event';
 import path from 'path';
 import {constants, promises, existsSync} from "fs";
+import { promises as pstream, PassThrough } from 'stream';
 
 const {format} = winston;
 const {combine, printf, timestamp, label, splat, errors} = format;
+const client = got.extend({
+    headers: {
+        'Icy-MetaData': '1',
+    }
+})
 
-export const icyRequest = async (url, func, options = {}) => {
-    const {
-        body,
-        method = 'GET',
-    } = options;
-    const urlInfo = new URL(url);
-    const {
-        host,
-        pathname: path,
-        protocol,
-    } = urlInfo;
+export const icyRequest = async (url, options = undefined) => {
+    const response = await client.stream(url, options);
 
-    const params = {
-        host,
-        path,
-        protocol,
-        method,
-        ...options,
-    };
+    const res = await pEvent(response, 'response')
+    const metaint = res.headers['icy-metaint'];
+    if (metaint !== undefined) {
+        const ir = new IcyReader(metaint);
+        return [response.pipe(ir), response, res];
+    }
 
-    return new Promise((resolve, reject) => {
-        const req = icy.request(params, (res) => {
-            if (res.statusCode < 200 || res.statusCode >= 300) {
-                return reject(new Error(`Status Code: ${res.statusCode}`));
-            }
-            resolve(res);
-        });
-
-        req.on('error', reject);
-
-        if (body !== undefined) {
-            req.write(body);
-        }
-
-        // IMPORTANT
-        req.end();
-    });
-};
+    return [response, response, res];
+}
 
 export const generateCue = (markers) => {
 return `PERFORMER ""
@@ -228,7 +210,7 @@ export const getOutputPath = async (filePath, {
     let unique = false;
     let uniqueFilePath;
     while (!unique) {
-        uniqueFilePath = `${filename}-${cnt}${ext}`;
+        uniqueFilePath = path.join(dir,`${filename}-${cnt}${ext}`);
         try {
             await promises.access(uniqueFilePath, constants.F_OK);
         } catch (e) {
