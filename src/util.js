@@ -16,13 +16,15 @@ export const icyRequest = async (url, func, options = {}) => {
     } = options;
     const urlInfo = new URL(url);
     const {
-        host,
+        hostname,
+        port,
         pathname: path,
         protocol,
     } = urlInfo;
 
     const params = {
-        host,
+        host: hostname,
+        port,
         path,
         protocol,
         method,
